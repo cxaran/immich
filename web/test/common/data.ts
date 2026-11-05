@@ -15,6 +15,7 @@ import {
   type AssetResponseDto,
   type CreateAlbumDto,
   type DownloadInfoDto,
+  type DuplicateResolveDto,
   type DuplicateResponseDto,
   type MapMarkerResponseDto,
   type MemoryResponseDto,
@@ -23,7 +24,9 @@ import {
   type PersonResponseDto,
   type SearchResponseDto,
   type SharedLinkResponseDto,
+  type StackCreateDto,
   type StackResponseDto,
+  type StackUpdateDto,
   type TagResponseDto,
   type TimeBucketAssetResponseDto,
   type TimeBucketsResponseDto,
@@ -342,6 +345,23 @@ export class MockData {
     return [...groups].map(([duplicateId, assets]) => ({ duplicateId, assets, suggestedKeepAssetIds: [assets[0].id] }));
   }
 
+  resolveDuplicates({ groups }: DuplicateResolveDto) {
+    for (const { duplicateId, trashAssetIds } of groups) {
+      this.deleteDuplicates([duplicateId]);
+      this.deleteAssets(trashAssetIds);
+    }
+    return groups.map(({ duplicateId }) => ({ id: duplicateId, success: true }));
+  }
+
+  deleteDuplicates(duplicateIds: string[]) {
+    const ids = new Set(duplicateIds);
+    const duplicates = [...this.assets.values()].filter(({ duplicateId }) => duplicateId && ids.has(duplicateId));
+    for (const asset of duplicates) {
+      this.assets.set(asset.id, { ...asset, duplicateId: null });
+    }
+    return this;
+  }
+
   removeFromAlbum(albumId: string, assetIds: string[]) {
     const members = this.albumAssets.get(albumId);
     return assetIds.map((id) => ({ id, success: members?.delete(id) ?? false }));
@@ -422,6 +442,43 @@ export class MockData {
         asset.stack = { id: stack.id, assetCount: stack.assets.length, primaryAssetId: stack.primaryAssetId };
         this.assets.set(asset.id, asset);
       }
+    }
+    return this;
+  }
+
+  createStack({ assetIds }: StackCreateDto) {
+    const stack = factory.stack({ assets: assetIds.map((id) => this.assets.get(id)!) });
+    this.addStacks(stack);
+    return stack;
+  }
+
+  updateStack(id: string, { primaryAssetId }: StackUpdateDto) {
+    const stack = this.stacks.get(id);
+    if (!stack) {
+      return;
+    }
+    const updated = { ...stack, primaryAssetId: primaryAssetId ?? stack.primaryAssetId };
+    this.stacks.set(id, updated);
+    return updated;
+  }
+
+  removeFromStack(id: string, assetId: string) {
+    const stack = this.stacks.get(id);
+    const asset = this.assets.get(assetId);
+    if (!stack || !asset) {
+      return;
+    }
+    this.stacks.set(id, { ...stack, assets: stack.assets.filter((asset) => asset.id !== assetId) });
+    this.assets.set(assetId, { ...asset, stack: null });
+    return this;
+  }
+
+  deleteStacks(ids: string[]) {
+    for (const id of ids) {
+      for (const asset of this.stacks.get(id)?.assets ?? []) {
+        this.assets.set(asset.id, { ...asset, stack: null });
+      }
+      this.stacks.delete(id);
     }
     return this;
   }
